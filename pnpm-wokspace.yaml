@@ -1,0 +1,4 @@
+packages:
+  - '.'  # Root package
+  # Add any other workspace directories you have, like:
+  # - 'packages/*'
