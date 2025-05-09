@@ -2,14 +2,14 @@
 // src/lib/auth/utils.ts
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose'
 
-// --- 1) Prepare your HMAC key once via Web Crypto ---
+
 const JWT_SECRET = process.env.JWT_SECRET!
 if (!JWT_SECRET) {
   throw new Error('Missing process.env.JWT_SECRET')
 }
 const encoder = new TextEncoder()
 const rawSecret = encoder.encode(JWT_SECRET)
-// we import this once and reuse it for sign & verify:
+
 const secretKeyPromise = crypto.subtle.importKey(
   'raw',
   rawSecret,
