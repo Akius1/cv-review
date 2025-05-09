@@ -1,53 +1,124 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getCloudflareContext } from '@/lib/cloudflare';
+// src/app/api/chat/partners/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+
+// Server-side Supabase client with service role key to bypass RLS if needed
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
+// CORS headers helper
+function buildCorsHeaders(origin: string) {
+  return {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  const origin = request.headers.get('origin') || '*'
+  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) })
+}
 
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin') || '*'
   try {
-    const userId = request.nextUrl.searchParams.get('userId');
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Missing user ID' },
-        { status: 400 }
-      );
+    const userIdParam = request.nextUrl.searchParams.get('userId')
+    if (!userIdParam) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Missing userId parameter' }),
+        { status: 400, headers: buildCorsHeaders(origin) }
+      )
     }
-    
-    // Get database from Cloudflare context
-    const { env } = getCloudflareContext();
-    const db = env.DB;
-    
-    // Get all chat partners for this user
-    const chatPartners = await db.prepare(`
-      SELECT DISTINCT 
-        u.id, u.first_name, u.last_name, u.email, u.user_type,
-        (SELECT MAX(created_at) FROM messages 
-         WHERE (sender_id = ? AND receiver_id = u.id) 
-            OR (sender_id = u.id AND receiver_id = ?)) as last_message_time,
-        (SELECT COUNT(*) FROM messages 
-         WHERE sender_id = u.id AND receiver_id = ? AND is_read = 0) as unread_count
-      FROM users u
-      JOIN messages m ON (m.sender_id = u.id AND m.receiver_id = ?) 
-                      OR (m.sender_id = ? AND m.receiver_id = u.id)
-      ORDER BY last_message_time DESC
-    `)
-    .bind(
-      parseInt(userId), 
-      parseInt(userId), 
-      parseInt(userId), 
-      parseInt(userId), 
-      parseInt(userId)
+
+    const userId = Number(userIdParam)
+    if (isNaN(userId)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid userId parameter' }),
+        { status: 400, headers: buildCorsHeaders(origin) }
+      )
+    }
+
+    // Fetch all messages involving this user
+    const { data: msgs, error: msgErr } = await supabase
+      .from('messages')
+      .select(
+        `id, sender_id, receiver_id, content, is_read, created_at,
+         sender:users(id, first_name, last_name, email, user_type),
+         receiver:users(id, first_name, last_name, email, user_type)`
+      )
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('created_at', { ascending: true })
+
+    if (msgErr) {
+      console.error('Error fetching messages:', msgErr)
+      return new NextResponse(
+        JSON.stringify({ error: 'Failed to fetch messages' }),
+        { status: 500, headers: buildCorsHeaders(origin) }
+      )
+    }
+
+    // Build partner map
+    interface PartnerInfo {
+      id: number
+      first_name: string
+      last_name: string
+      email: string
+      user_type: string
+      last_message_time: string
+      unread_count: number
+    }
+
+    const partnerMap = new Map<number, PartnerInfo>()
+
+    msgs?.forEach(msg => {
+      const isSender = msg.sender_id === userId
+      const partnerUser = isSender ? msg.receiver : msg.sender
+      if (!partnerUser) return
+
+      const existing = partnerMap.get(partnerUser.id)
+      const lastTime = msg.created_at
+
+      if (existing) {
+        // update last_message_time if this msg is newer
+        if (new Date(lastTime) > new Date(existing.last_message_time)) {
+          existing.last_message_time = lastTime
+        }
+        // count unread if this msg was sent to user and not read
+        if (!isSender && msg.is_read === 0) {
+          existing.unread_count += 1
+        }
+      } else {
+        partnerMap.set(partnerUser.id, {
+          id: partnerUser.id,
+          first_name: partnerUser.first_name,
+          last_name: partnerUser.last_name,
+          email: partnerUser.email,
+          user_type: partnerUser.user_type,
+          last_message_time: lastTime,
+          unread_count: (!isSender && msg.is_read === 0) ? 1 : 0,
+        })
+      }
+    })
+
+    // Sort partners by most recent message desc
+    const chatPartners = Array.from(partnerMap.values()).sort((a, b) =>
+      new Date(b.last_message_time).getTime() -
+      new Date(a.last_message_time).getTime()
     )
-    .all();
-    
-    return NextResponse.json({
-      success: true,
-      chatPartners: chatPartners.results
-    });
+
+    return new NextResponse(
+      JSON.stringify({ success: true, chatPartners }),
+      { status: 200, headers: buildCorsHeaders(origin) }
+    )
   } catch (error) {
-    console.error('Get chat partners error:', error);
-    return NextResponse.json(
-      { error: 'Failed to get chat partners' },
-      { status: 500 }
-    );
+    console.error('Error in chat partners route:', error)
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: buildCorsHeaders(request.headers.get('origin') || '*') }
+    )
   }
 }

@@ -1,73 +1,108 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getCloudflareContext } from '@/lib/cloudflare';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// src/app/api/chat/send/route.ts
+import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 
-export async function POST(request: NextRequest) {
+// Initialize Supabase client with service role key (bypasses RLS)
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
+export async function POST(request: Request) {
   try {
     const { senderId, receiverId, content } = (await request.json()) as {
-        senderId: string;
-        receiverId: string;
-        content: string
+      senderId: number | string
+      receiverId: number | string
+      content: string
     }
-    
-    if (!senderId || !receiverId || !content) {
+
+    // Validate input
+    const sid = Number(senderId)
+    const rid = Number(receiverId)
+    if (!sid || !rid || !content?.trim()) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing or invalid fields' },
         { status: 400 }
-      );
+      )
     }
-    
-    // Get database from Cloudflare context
-    const { env } = getCloudflareContext();
-    const db = env.DB;
-    
-    // Insert message
-    const result = await db.prepare(`
-      INSERT INTO messages (sender_id, receiver_id, content, is_read)
-      VALUES (?, ?, ?, 0)
-    `)
-    .bind(parseInt(senderId), parseInt(receiverId), content)
-    .run();
-    
-    const messageId = result.meta.last_row_id;
-    
-    // Get sender info
-    const sender = await db.prepare(`
-      SELECT first_name, last_name
-      FROM users
-      WHERE id = ?
-    `)
-    .bind(parseInt(senderId))
-    .first();
-    
-    // Get receiver info
-    const receiver = await db.prepare(`
-      SELECT first_name, last_name
-      FROM users
-      WHERE id = ?
-    `)
-    .bind(parseInt(receiverId))
-    .first();
-    
+
+    // Insert new message
+    const { data: inserted, error: insertError } = await supabase
+      .from('messages')
+      .insert({
+        sender_id: sid,
+        receiver_id: rid,
+        content: content.trim(),
+        is_read: false
+      })
+      .select('id')
+      .single()
+
+    if (insertError || !inserted) {
+      console.error('Insert message error:', insertError)
+      return NextResponse.json(
+        { error: 'Failed to send message' },
+        { status: 500 }
+      )
+    }
+
+    // Fetch full message with user names via foreign-key join
+    const { data: msgRow, error: fetchError } = await supabase
+      .from('messages')
+      .select(`
+        id,
+        sender_id,
+        receiver_id,
+        content,
+        is_read,
+        created_at,
+        sender:users!sender_id ( first_name, last_name ),
+        receiver:users!receiver_id ( first_name, last_name )
+      `)
+      .eq('id', inserted.id)
+      .single()
+
+    if (fetchError || !msgRow) {
+      console.error('Fetch message error:', fetchError)
+      return NextResponse.json(
+        { error: 'Failed to load message details' },
+        { status: 500 }
+      )
+    }
+
+    const {
+      id,
+      sender_id,
+      receiver_id,
+      content: msgContent,
+      is_read,
+      created_at,
+      sender,
+      receiver
+    } = msgRow
+
+    // Respond with same shape as before
     return NextResponse.json({
       success: true,
       message: {
-        id: messageId,
-        sender_id: senderId,
-        receiver_id: receiverId,
-        content,
-        is_read: 0,
-        created_at: new Date().toISOString(),
-        sender_first_name: sender.first_name,
-        sender_last_name: sender.last_name,
-        receiver_first_name: receiver.first_name,
-        receiver_last_name: receiver.last_name
+        id,
+        sender_id,
+        receiver_id,
+        content: msgContent,
+        is_read: Number(is_read),
+        created_at,
+        sender_first_name: (sender as any).first_name,
+        sender_last_name: (sender as any).last_name,
+        receiver_first_name: (receiver as any).first_name,
+        receiver_last_name: (receiver as any).last_name
       }
-    });
+    })
   } catch (error) {
-    console.error('Send message error:', error);
+    console.error('Send message error:', error)
     return NextResponse.json(
       { error: 'Failed to send message' },
       { status: 500 }
-    );
+    )
   }
 }

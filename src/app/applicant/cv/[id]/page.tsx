@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import AuthGuard from "@/components/auth/AuthGuard";
 
 interface CV {
@@ -23,12 +23,10 @@ interface Review {
 
 export interface AuthResponse {
   authenticated: boolean;
-
   user?: {
     id: any;
     email: string;
     user_type: "applicant" | "expert";
-    // other user properties as needed
   };
   error?: string;
 }
@@ -37,7 +35,12 @@ export interface CVApiResponse {
   success: boolean;
   cv: CV;
   reviews: Review[];
-  responses: Response[];
+  responses: {
+    id: number;
+    review_id: number;
+    content: string;
+    created_at: string;
+  }[];
 }
 export interface ReviewResponse {
   success: boolean;
@@ -49,10 +52,13 @@ export interface ReviewResponse {
   };
 }
 
-export default function CVDetailPage({ params }: { params: { id: string } }) {
+export default function CVDetailPage() {
   const router = useRouter();
-  const [cv, setCV] = useState<any>(null);
-  const [reviews, setReviews] = useState<any[]>([]);
+  const params = useParams();
+  const cvId = params.id as string;
+
+  const [cv, setCV] = useState<CV | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [responses, setResponses] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,16 +69,13 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch user data
         const userResponse = await fetch("/api/auth/check");
         const userData = (await userResponse.json()) as AuthResponse;
 
-        if (userData?.authenticated) {
+        if (userData.authenticated) {
           setUser(userData.user);
-
-          // Fetch CV details
-          const cvResponse = await fetch(`/api/cv/${params.id}`);
-          const cvData: any = await cvResponse.json();
+          const cvResponse = await fetch(`/api/cv/${cvId}`);
+          const cvData = (await cvResponse.json()) as CVApiResponse;
 
           if (cvData.success) {
             setCV(cvData.cv);
@@ -80,39 +83,31 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
             setResponses(cvData.responses);
           }
         }
-
-        setIsLoading(false);
       } catch (error) {
         console.error("Error fetching data:", error);
+      } finally {
         setIsLoading(false);
       }
     };
 
-    fetchData();
-  }, [params?.id]);
+    if (cvId) fetchData();
+  }, [cvId]);
 
   const handleResponseSubmit = async (reviewId: number) => {
     if (!responseContent.trim()) return;
-
     setIsSubmitting(true);
-
     try {
       const response = await fetch("/api/review/respond", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           reviewId,
           content: responseContent,
           userId: user.id,
         }),
       });
-
-      const data: ReviewResponse = await response.json();
-
+      const data = (await response.json()) as ReviewResponse;
       if (data.success) {
-        // Add new response to the list
         setResponses([...responses, data.response]);
         setResponseContent("");
         setActiveReviewId(null);
@@ -124,9 +119,8 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
     }
   };
 
-  const getResponsesForReview = (reviewId: number) => {
-    return responses.filter((response) => response.review_id === reviewId);
-  };
+  const getResponsesForReview = (reviewId: number) =>
+    responses.filter((r) => r.review_id === reviewId);
 
   if (isLoading) {
     return (
@@ -139,26 +133,21 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
   return (
     <AuthGuard userType="applicant">
       <div className="min-h-screen bg-gray-100">
-        {/* Header */}
         <header className="bg-white shadow">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">CV Details</h1>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => router.push("/applicant/dashboard")}
-                className="px-3 py-1 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500"
-              >
-                Back to Dashboard
-              </button>
-            </div>
+            <button
+              onClick={() => router.push("/applicant/dashboard")}
+              className="px-3 py-1 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+            >
+              Back to Dashboard
+            </button>
           </div>
         </header>
-
-        {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {cv ? (
             <div className="space-y-8">
-              {/* CV Information */}
+              {/* CV Info */}
               <div className="bg-white shadow rounded-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">CV Information</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -190,104 +179,123 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
                   </div>
                 </div>
               </div>
+              {/* Reviews */}
+              <div className="bg-white shadow rounded-lg overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-6 py-4">
+                  <h2 className="text-xl font-bold text-white flex items-center">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6 mr-2"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    Expert Reviews
+                  </h2>
+                </div>
 
-              {/* Reviews Section */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">Expert Reviews</h2>
-
+                {/* <h2 className="text-xl font-semibold mb-4"></h2> */}
                 {reviews.length === 0 ? (
                   <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-                    <p className="text-gray-600">
-                      No reviews yet. Your CV is waiting to be reviewed by our
-                      experts.
-                    </p>
+                    <p className="text-gray-600">No reviews yet.</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
                     {reviews.map((review) => (
-                      <div
-                        key={review.id}
-                        className="border border-gray-200 rounded-lg overflow-hidden"
-                      >
-                        <div className="bg-gray-50 p-4">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h3 className="font-medium">
-                                Review by {review.first_name} {review.last_name}
-                              </h3>
-                              <p className="text-sm text-gray-500">
-                                {new Date(
-                                  review.created_at
-                                ).toLocaleDateString()}
-                              </p>
+                      <div key={review.id} className="border rounded-lg">
+                        <div className="bg-gray-50 p-4 flex justify-between">
+                          <div>
+                            <h3 className="font-medium">
+                              Review by {review.first_name} {review.last_name}
+                            </h3>
+                            <p className="text-sm text-gray-500">
+                              {new Date(review.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() =>
+                              setActiveReviewId(
+                                activeReviewId === review.id ? null : review.id
+                              )
+                            }
+                            className="px-3 py-1 bg-blue-600 text-white rounded-md"
+                          >
+                            {activeReviewId === review.id
+                              ? "Cancel"
+                              : "Respond"}
+                          </button>
+                        </div>
+                        {/* Review Content Card */}
+                        <div className="bg-gray-50 rounded-lg p-5 border border-gray-200 mb-4">
+                          <div className="flex items-start">
+                            <div className="flex-shrink-0 mt-1">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="h-5 w-5 text-blue-500"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                                />
+                              </svg>
                             </div>
-                            <button
-                              onClick={() =>
-                                setActiveReviewId(
-                                  activeReviewId === review.id
-                                    ? null
-                                    : review.id
-                                )
-                              }
-                              className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
-                            >
-                              {activeReviewId === review.id
-                                ? "Cancel"
-                                : "Respond"}
-                            </button>
+                            <div className="ml-3 flex-grow">
+                              <h4 className="text-sm font-medium text-gray-900 mb-2">
+                                Review Feedback
+                              </h4>
+                              <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-line">
+                                {review.content}
+                              </div>
+                            </div>
                           </div>
                         </div>
-
-                        <div className="p-4 bg-white">
-                          <div className="prose max-w-none">
-                            <p>{review.content}</p>
-                          </div>
-                        </div>
-
-                        {/* Responses */}
                         {getResponsesForReview(review.id).length > 0 && (
-                          <div className="border-t border-gray-200 p-4 bg-gray-50">
+                          <div className="bg-gray-50 p-4">
                             <h4 className="font-medium mb-2">Your Responses</h4>
-                            <div className="space-y-3">
-                              {getResponsesForReview(review.id).map(
-                                (response) => (
-                                  <div
-                                    key={response.id}
-                                    className="bg-white p-3 rounded-md border border-gray-200"
-                                  >
-                                    <p className="text-sm text-gray-500 mb-1">
-                                      {new Date(
-                                        response.created_at
-                                      ).toLocaleDateString()}
-                                    </p>
-                                    <p>{response.content}</p>
-                                  </div>
-                                )
-                              )}
-                            </div>
+                            {getResponsesForReview(review.id).map((res) => (
+                              <div
+                                key={res.id}
+                                className="border p-3 rounded-md mb-2"
+                              >
+                                <p className="text-sm text-gray-500">
+                                  {new Date(
+                                    res.created_at
+                                  ).toLocaleDateString()}
+                                </p>
+                                <p>{res.content}</p>
+                              </div>
+                            ))}
                           </div>
                         )}
-
-                        {/* Response Form */}
                         {activeReviewId === review.id && (
-                          <div className="border-t border-gray-200 p-4">
-                            <h4 className="font-medium mb-2">Your Response</h4>
+                          <div className="p-4 border-t">
                             <textarea
                               value={responseContent}
                               onChange={(e) =>
                                 setResponseContent(e.target.value)
                               }
-                              className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                              className="w-full p-2 border rounded-md"
                               rows={3}
-                              placeholder="Type your response here..."
-                            ></textarea>
-                            <div className="mt-2 flex justify-end">
+                            />
+                            <div className="flex justify-end mt-2">
                               <button
                                 onClick={() => handleResponseSubmit(review.id)}
                                 disabled={
                                   isSubmitting || !responseContent.trim()
                                 }
-                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md"
                               >
                                 {isSubmitting
                                   ? "Submitting..."
@@ -304,9 +312,7 @@ export default function CVDetailPage({ params }: { params: { id: string } }) {
             </div>
           ) : (
             <div className="bg-white shadow rounded-lg p-6">
-              <p className="text-gray-600">
-                CV not found or you don&apos;t have permission to view it.
-              </p>
+              <p className="text-gray-600">CV not found.</p>
             </div>
           )}
         </main>

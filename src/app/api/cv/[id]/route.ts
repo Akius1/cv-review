@@ -25,16 +25,27 @@ export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) })
 }
 
+// Dynamic API routes params must be awaited per Next.js
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   const origin = request.headers.get('origin') || '*'
+
   try {
-    const cvId = params.id
-    if (!cvId) {
+    // Await dynamic params
+    const { id } = await context.params
+    if (!id) {
       return new NextResponse(
         JSON.stringify({ error: 'Missing CV ID' }),
+        { status: 400, headers: buildCorsHeaders(origin) }
+      )
+    }
+
+    const cvId = Number(id)
+    if (isNaN(cvId)) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid CV ID' }),
         { status: 400, headers: buildCorsHeaders(origin) }
       )
     }
@@ -43,7 +54,7 @@ export async function GET(
     const { data: cv, error: cvErr } = await supabase
       .from('cvs')
       .select('id, file_name, file_path, status, created_at')
-      .eq('id', Number(cvId))
+      .eq('id', cvId)
       .single()
 
     if (cvErr || !cv) {
@@ -57,8 +68,8 @@ export async function GET(
     // Fetch related reviews
     const { data: reviewsRaw, error: revErr } = await supabase
       .from('reviews')
-      .select('id, content, created_at, expert:users(id, first_name, last_name)')
-      .eq('cv_id', Number(cvId))
+      .select('id, content, created_at, expert:users(first_name, last_name)')
+      .eq('cv_id', cvId)
       .order('created_at', { ascending: false })
 
     if (revErr) {
@@ -69,18 +80,23 @@ export async function GET(
       )
     }
 
-    // Map reviews to desired shape
-    const reviews = (reviewsRaw || []).map(r => ({
-      id: r.id,
-      content: r.content,
-      created_at: r.created_at,
-      first_name: r.expert?.first_name,
-      last_name: r.expert?.last_name,
-    }))
+    // Map reviews to desired shape, handling nested expert users
+    const reviews = (reviewsRaw || []).map(r => {
+      // Normalize expert relationship (could be array or single object)
+      const reviewer = Array.isArray(r.expert) ? r.expert[0] : r.expert;
+      return {
+        id: r.id,
+        content: r.content,
+        created_at: r.created_at,
+        first_name: reviewer?.first_name,
+        last_name: reviewer?.last_name,
+      };
+    });
 
     // Fetch responses for these reviews
     const reviewIds = reviews.map(r => r.id)
     let responses: any[] = []
+
     if (reviewIds.length) {
       const { data: respRaw, error: respErr } = await supabase
         .from('responses')
