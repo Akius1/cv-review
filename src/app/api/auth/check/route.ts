@@ -7,6 +7,8 @@ import { verifyToken } from '@/lib/auth/utils'
 interface AuthPayload {
   id: number
   email: string
+  first_name?: string
+  last_name?: string
   user_type: 'applicant' | 'expert'
   iat?: number
   exp?: number
@@ -28,9 +30,9 @@ export async function GET() {
       return NextResponse.json({ authenticated: false }, { status: 401 })
     }
 
-    const { id, email, user_type } = verified
+    const { id, email, user_type, first_name, last_name } = verified
     return NextResponse.json(
-      { authenticated: true, user: { id, email, user_type } },
+      { authenticated: true, user: { id, email, user_type, first_name, last_name } },
       { status: 200 }
     )
   } catch (error) {

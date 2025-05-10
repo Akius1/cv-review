@@ -105,6 +105,8 @@ export async function POST(request: NextRequest) {
     const token = await generateToken({
       id: newUser.id,
       email: newUser.email,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
       user_type: newUser.user_type,
     })
 

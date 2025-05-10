@@ -6,6 +6,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/auth/AuthGuard";
 import { AuthResponse, CVApiResponse, ReviewResponse } from "../cv/[id]/page";
+import Header from "@/components/common/Header";
+import Footer from "@/components/common/Footer";
 
 interface CV {
   id: number;
@@ -24,6 +26,7 @@ export default function ApplicantDashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState("Applicant Dashboard");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -142,24 +145,12 @@ export default function ApplicantDashboard() {
     <AuthGuard userType="applicant">
       <div className="min-h-screen bg-gray-100">
         {/* Header */}
-        <header className="bg-white shadow">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">
-              Applicant Dashboard
-            </h1>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">
-                Welcome, {user?.first_name || "Applicant"}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </header>
+        <Header
+          user={user}
+          setActiveTab={setActiveTab}
+          activeTab={activeTab}
+          handleLogout={handleLogout}
+        />
 
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -285,6 +276,7 @@ export default function ApplicantDashboard() {
           </div>
         </main>
       </div>
+      <Footer />
     </AuthGuard>
   );
 }
