@@ -56,7 +56,7 @@ export default function LandingPage() {
       delay: 0.2,
     },
     {
-      title: "AI-Powered Analysis",
+      title: "Coming Soon: AI-Powered Analysis",
       description:
         "Our AI tools analyze your resume, providing skills assessments and marketability scores to guide your career development.",
       icon: <Star className="text-indigo-600" size={28} />,
