@@ -1,9 +1,0 @@
-# *
-User-agent: *
-Allow: /
-
-# Host
-Host: https://www.resumexpert.info
-
-# Sitemaps
-Sitemap: https://www.resumexpert.info/sitemap.xml
