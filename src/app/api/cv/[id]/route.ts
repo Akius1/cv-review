@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/api/cv/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+);
 
 // CORS helper
 function buildCorsHeaders(origin: string) {
@@ -17,12 +17,12 @@ function buildCorsHeaders(origin: string) {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Credentials': 'true',
-  }
+  };
 }
 
 export async function OPTIONS(request: NextRequest) {
-  const origin = request.headers.get('origin') || '*'
-  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) })
+  const origin = request.headers.get('origin') || '*';
+  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) });
 }
 
 // Dynamic API routes params must be awaited per Next.js
@@ -30,24 +30,24 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const origin = request.headers.get('origin') || '*'
+  const origin = request.headers.get('origin') || '*';
 
   try {
     // Await dynamic params
-    const { id } = await context.params
+    const { id } = await context.params;
     if (!id) {
       return new NextResponse(
         JSON.stringify({ error: 'Missing CV ID' }),
         { status: 400, headers: buildCorsHeaders(origin) }
-      )
+      );
     }
 
-    const cvId = Number(id)
+    const cvId = Number(id);
     if (isNaN(cvId)) {
       return new NextResponse(
         JSON.stringify({ error: 'Invalid CV ID' }),
         { status: 400, headers: buildCorsHeaders(origin) }
-      )
+      );
     }
 
     // Fetch CV record
@@ -55,14 +55,14 @@ export async function GET(
       .from('cvs')
       .select('id, file_name, file_path, status, created_at')
       .eq('id', cvId)
-      .single()
+      .single();
 
     if (cvErr || !cv) {
-      console.error('CV fetch error:', cvErr)
+      console.error('CV fetch error:', cvErr);
       return new NextResponse(
-        JSON.stringify({ error: 'CV not found' }),
+        JSON.stringify({ success: false, error: 'CV not found' }), // Added success: false
         { status: 404, headers: buildCorsHeaders(origin) }
-      )
+      );
     }
 
     // Fetch related reviews
@@ -70,18 +70,18 @@ export async function GET(
       .from('reviews')
       .select('id, content, created_at, expert:users(first_name, last_name)')
       .eq('cv_id', cvId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (revErr) {
-      console.error('Reviews fetch error:', revErr)
+      console.error('Reviews fetch error:', revErr);
       return new NextResponse(
-        JSON.stringify({ error: 'Failed to fetch reviews' }),
+        JSON.stringify({ success: false, error: 'Failed to fetch reviews' }), // Added success: false
         { status: 500, headers: buildCorsHeaders(origin) }
-      )
+      );
     }
 
     // Map reviews to desired shape, handling nested expert users
-    const reviews = (reviewsRaw || []).map(r => {
+    const reviews = (reviewsRaw || []).map((r: any) => { // Explicitly type r as any for nested access
       // Normalize expert relationship (could be array or single object)
       const reviewer = Array.isArray(r.expert) ? r.expert[0] : r.expert;
       return {
@@ -94,35 +94,35 @@ export async function GET(
     });
 
     // Fetch responses for these reviews
-    const reviewIds = reviews.map(r => r.id)
-    let responses: any[] = []
+    const reviewIds = reviews.map(r => r.id);
+    let responses: any[] = []; // Explicitly type responses as any[]
 
     if (reviewIds.length) {
       const { data: respRaw, error: respErr } = await supabase
         .from('responses')
         .select('id, review_id, content, created_at')
         .in('review_id', reviewIds)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: true });
 
       if (respErr) {
-        console.error('Responses fetch error:', respErr)
+        console.error('Responses fetch error:', respErr);
         return new NextResponse(
-          JSON.stringify({ error: 'Failed to fetch responses' }),
+          JSON.stringify({ success: false, error: 'Failed to fetch responses' }), // Added success: false
           { status: 500, headers: buildCorsHeaders(origin) }
-        )
+        );
       }
-      responses = respRaw || []
+      responses = respRaw || [];
     }
 
     return new NextResponse(
       JSON.stringify({ success: true, cv, reviews, responses }),
       { status: 200, headers: buildCorsHeaders(origin) }
-    )
+    );
   } catch (error) {
-    console.error('CV detail route error:', error)
+    console.error('CV detail route error:', error);
     return new NextResponse(
-      JSON.stringify({ error: 'Failed to get CV details' }),
+      JSON.stringify({ success: false, error: 'Failed to get CV details' }), // Added success: false
       { status: 500, headers: buildCorsHeaders(request.headers.get('origin') || '*') }
-    )
+    );
   }
 }

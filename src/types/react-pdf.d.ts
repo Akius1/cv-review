@@ -31,3 +31,35 @@ declare module 'react-pdf' {
     version: string;
   };
 }
+
+export interface Expert {
+  id: string;
+  name: string;
+  email: string;
+  expertise: string[];
+}
+
+export interface Applicant {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface Availability {
+  id: string;
+  expertId: string;
+  startTime: Date;
+  endTime: Date;
+  isBooked: boolean;
+}
+
+export interface Booking {
+  id: string;
+  availabilityId: string;
+  applicantId: string;
+  expertId: string;
+  startTime: Date;
+  endTime: Date;
+  googleMeetLink?: string;
+  status: 'scheduled' | 'canceled' | 'completed';
+}

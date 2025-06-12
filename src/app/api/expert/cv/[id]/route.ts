@@ -65,9 +65,9 @@ export async function GET(
       file_path: cv.file_path,
       status: cv.status,
       created_at: cv.created_at,
-      first_name: cv.users.first_name,
-      last_name: cv.users.last_name,
-      email: cv.users.email,
+      first_name: (cv.users as any).first_name,
+      last_name: (cv.users as any).last_name,
+      email: (cv.users as any).email,
     }
 
     // Fetch existing reviews by this expert on this CV
