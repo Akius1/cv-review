@@ -23,6 +23,7 @@ import {
 
 interface TimeSlot {
   id?: number;
+  tempId?: string; // Add temporary ID for new slots
   date: string;
   startTime: string;
   endTime: string;
@@ -59,8 +60,7 @@ export default function AvailabilityManagement() {
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
-  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
-  const [allTimeSlots, setAllTimeSlots] = useState<TimeSlot[]>([]);
+  const [allTimeSlots, setAllTimeSlots] = useState<TimeSlot[]>([]); // All slots (saved + new)
   const [preferences, setPreferences] = useState<AvailabilityPreference[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -72,6 +72,7 @@ export default function AvailabilityManagement() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [nextTempId, setNextTempId] = useState(1); // Counter for temporary IDs
 
   // Animation variants
   const pageVariants = {
@@ -90,47 +91,10 @@ export default function AvailabilityManagement() {
     fetchPreferences();
   }, []);
 
-  useEffect(() => {
-    applyFilter();
-  }, [filterPeriod, filterDate, allTimeSlots]);
-
-  const fetchAvailability = async () => {
-    setIsLoading(true);
-    try {
-      // Fetch all availability data initially
-      const response = await fetch(`/api/expert/availability?period=all`);
-      const data: ApiResponse = await response.json();
-
-      if (data.success && data.availability) {
-        const slots: TimeSlot[] = data.availability.map((slot: any) => ({
-          id: slot.id,
-          date: slot.date,
-          startTime: slot.start_time.substring(0, 5), // "09:00"
-          endTime: slot.end_time.substring(0, 5), // "10:00"
-          timezone: slot.timezone,
-          maxBookings: slot.max_bookings,
-          currentBookings: slot.bookings
-            ? slot.bookings.filter((b: any) => b.status === "scheduled").length
-            : 0,
-        }));
-        setAllTimeSlots(slots);
-        setTimeSlots(slots);
-      } else {
-        setAllTimeSlots([]);
-        setTimeSlots([]);
-      }
-    } catch (error) {
-      console.error("Error fetching availability:", error);
-      setMessage({ type: "error", text: "Failed to load availability" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const applyFilter = () => {
+  // Get filtered slots for display
+  const getFilteredSlots = (): TimeSlot[] => {
     if (filterPeriod === "all") {
-      setTimeSlots(allTimeSlots);
-      return;
+      return allTimeSlots;
     }
 
     const baseDate = new Date(filterDate);
@@ -145,7 +109,7 @@ export default function AvailabilityManagement() {
         // Get the start of the week (Monday)
         const startOfWeek = new Date(baseDate);
         const dayOfWeek = startOfWeek.getDay();
-        const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday (0), subtract 6; otherwise subtract (dayOfWeek - 1)
+        const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
 
         const endOfWeek = new Date(startOfWeek);
@@ -170,7 +134,38 @@ export default function AvailabilityManagement() {
         break;
     }
 
-    setTimeSlots(filteredSlots);
+    return filteredSlots;
+  };
+
+  const fetchAvailability = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch all availability data initially
+      const response = await fetch(`/api/expert/availability?period=all`);
+      const data: ApiResponse = await response.json();
+
+      if (data.success && data.availability) {
+        const slots: TimeSlot[] = data.availability.map((slot: any) => ({
+          id: slot.id,
+          date: slot.date,
+          startTime: slot.start_time.substring(0, 5), // "09:00"
+          endTime: slot.end_time.substring(0, 5), // "10:00"
+          timezone: slot.timezone,
+          maxBookings: slot.max_bookings,
+          currentBookings: slot.bookings
+            ? slot.bookings.filter((b: any) => b.status === "scheduled").length
+            : 0,
+        }));
+        setAllTimeSlots(slots);
+      } else {
+        setAllTimeSlots([]);
+      }
+    } catch (error) {
+      console.error("Error fetching availability:", error);
+      setMessage({ type: "error", text: "Failed to load availability" });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const fetchPreferences = async () => {
@@ -187,7 +182,9 @@ export default function AvailabilityManagement() {
   };
 
   const addTimeSlot = () => {
+    const tempId = `temp_${nextTempId}`;
     const newSlot: TimeSlot = {
+      tempId,
       date: selectedDate,
       startTime: "09:00",
       endTime: "10:00",
@@ -195,17 +192,40 @@ export default function AvailabilityManagement() {
       maxBookings: 1,
       isSelected: true,
     };
-    setTimeSlots([...timeSlots, newSlot]);
+    setAllTimeSlots((prev) => [...prev, newSlot]);
+    setNextTempId((prev) => prev + 1);
   };
 
-  const updateTimeSlot = (index: number, field: keyof TimeSlot, value: any) => {
-    const updated = [...timeSlots];
-    updated[index] = { ...updated[index], [field]: value };
-    setTimeSlots(updated);
+  const updateTimeSlot = (
+    slotIdentifier: string | number,
+    field: keyof TimeSlot,
+    value: any
+  ) => {
+    setAllTimeSlots((prev) =>
+      prev.map((slot) => {
+        const matches =
+          typeof slotIdentifier === "string"
+            ? slot.tempId === slotIdentifier
+            : slot.id === slotIdentifier;
+
+        if (matches) {
+          return { ...slot, [field]: value };
+        }
+        return slot;
+      })
+    );
   };
 
-  const removeTimeSlot = (index: number) => {
-    setTimeSlots(timeSlots.filter((_, i) => i !== index));
+  const removeTimeSlot = (slotIdentifier: string | number) => {
+    setAllTimeSlots((prev) =>
+      prev.filter((slot) => {
+        const matches =
+          typeof slotIdentifier === "string"
+            ? slot.tempId === slotIdentifier
+            : slot.id === slotIdentifier;
+        return !matches;
+      })
+    );
   };
 
   const deleteExistingSlot = async (slotId: number) => {
@@ -237,8 +257,8 @@ export default function AvailabilityManagement() {
   const saveAvailability = async () => {
     setIsSaving(true);
     try {
-      const slotsToSave = timeSlots
-        .filter((slot) => !slot.id)
+      const slotsToSave = allTimeSlots
+        .filter((slot) => !slot.id && slot.tempId) // Only new slots
         .map((slot) => ({
           date: slot.date,
           startTime: slot.startTime,
@@ -315,7 +335,8 @@ export default function AvailabilityManagement() {
   };
 
   const groupSlotsByDate = () => {
-    const grouped = timeSlots.reduce(
+    const filteredSlots = getFilteredSlots();
+    const grouped = filteredSlots.reduce(
       (acc, slot) => {
         if (!acc[slot.date]) {
           acc[slot.date] = [];
@@ -333,6 +354,9 @@ export default function AvailabilityManagement() {
 
     return grouped;
   };
+
+  const hasNewSlots = allTimeSlots.some((slot) => slot.tempId && !slot.id);
+  const filteredSlots = getFilteredSlots();
 
   return (
     <AuthGuard userType="expert">
@@ -530,7 +554,7 @@ export default function AvailabilityManagement() {
                         Filter Availability
                       </h3>
                       <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-                        {timeSlots.length} slots
+                        {filteredSlots.length} slots
                       </span>
                     </div>
 
@@ -603,7 +627,7 @@ export default function AvailabilityManagement() {
                         />
                         <p className="text-gray-600">Loading availability...</p>
                       </div>
-                    ) : timeSlots.length === 0 ? (
+                    ) : filteredSlots.length === 0 ? (
                       <div className="text-center py-12">
                         <ClockIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                         <h3 className="text-lg font-medium text-gray-700 mb-2">
@@ -648,189 +672,202 @@ export default function AvailabilityManagement() {
                               </div>
 
                               <div className="space-y-3">
-                                {slots.map((slot, index) => (
-                                  <motion.div
-                                    key={slot.id || `new-${index}`}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: index * 0.1 }}
-                                    className={`p-4 rounded-xl border-2 transition-all duration-300 ${
-                                      slot.id
-                                        ? "border-green-200 bg-green-50"
-                                        : "border-blue-200 bg-blue-50 border-dashed"
-                                    }`}
-                                  >
-                                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-center">
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          Date
-                                        </label>
-                                        <input
-                                          type="date"
-                                          value={slot.date}
-                                          onChange={(e) =>
-                                            updateTimeSlot(
-                                              index,
-                                              "date",
-                                              e.target.value
-                                            )
-                                          }
-                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                                          disabled={!!slot.id}
-                                        />
-                                      </div>
+                                {slots.map((slot) => {
+                                  // Use the slot's unique identifier for the key
+                                  const slotKey = slot.id
+                                    ? `saved-${slot.id}`
+                                    : `temp-${slot.tempId}`;
+                                  const slotIdentifier =
+                                    slot.id || slot.tempId!;
 
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          Start Time
-                                        </label>
-                                        <select
-                                          value={slot.startTime}
-                                          onChange={(e) =>
-                                            updateTimeSlot(
-                                              index,
-                                              "startTime",
-                                              e.target.value
-                                            )
-                                          }
-                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                                          disabled={!!slot.id}
-                                        >
-                                          {generateTimeOptions().map((time) => (
-                                            <option key={time} value={time}>
-                                              {time}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
+                                  return (
+                                    <motion.div
+                                      key={slotKey}
+                                      initial={{ opacity: 0, y: 20 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      transition={{ delay: 0.1 }}
+                                      className={`p-4 rounded-xl border-2 transition-all duration-300 ${
+                                        slot.id
+                                          ? "border-green-200 bg-green-50"
+                                          : "border-blue-200 bg-blue-50 border-dashed"
+                                      }`}
+                                    >
+                                      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-center">
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Date
+                                          </label>
+                                          <input
+                                            type="date"
+                                            value={slot.date}
+                                            onChange={(e) =>
+                                              updateTimeSlot(
+                                                slotIdentifier,
+                                                "date",
+                                                e.target.value
+                                              )
+                                            }
+                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                            disabled={!!slot.id}
+                                          />
+                                        </div>
 
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          End Time
-                                        </label>
-                                        <select
-                                          value={slot.endTime}
-                                          onChange={(e) =>
-                                            updateTimeSlot(
-                                              index,
-                                              "endTime",
-                                              e.target.value
-                                            )
-                                          }
-                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                                          disabled={!!slot.id}
-                                        >
-                                          {generateTimeOptions().map((time) => (
-                                            <option key={time} value={time}>
-                                              {time}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          Max Bookings
-                                        </label>
-                                        <input
-                                          type="number"
-                                          min="1"
-                                          max="10"
-                                          value={slot.maxBookings}
-                                          onChange={(e) =>
-                                            updateTimeSlot(
-                                              index,
-                                              "maxBookings",
-                                              parseInt(e.target.value) || 1
-                                            )
-                                          }
-                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                                          disabled={!!slot.id}
-                                        />
-                                      </div>
-
-                                      <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                          Timezone
-                                        </label>
-                                        <select
-                                          value={slot.timezone}
-                                          onChange={(e) =>
-                                            updateTimeSlot(
-                                              index,
-                                              "timezone",
-                                              e.target.value
-                                            )
-                                          }
-                                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                                          disabled={!!slot.id}
-                                        >
-                                          <option value="Africa/Lagos">
-                                            West Africa Time (WAT)
-                                          </option>
-                                          <option value="UTC">UTC</option>
-                                          <option value="America/New_York">
-                                            Eastern Time
-                                          </option>
-                                          <option value="America/Chicago">
-                                            Central Time
-                                          </option>
-                                          <option value="America/Denver">
-                                            Mountain Time
-                                          </option>
-                                          <option value="America/Los_Angeles">
-                                            Pacific Time
-                                          </option>
-                                          <option value="Europe/London">
-                                            London Time
-                                          </option>
-                                        </select>
-                                      </div>
-
-                                      <div className="flex flex-col items-end space-y-2">
-                                        {slot.id ? (
-                                          <>
-                                            <div className="flex items-center space-x-2 text-green-600">
-                                              <CheckIcon className="h-4 w-4" />
-                                              <span className="text-sm font-medium">
-                                                Saved
-                                              </span>
-                                            </div>
-                                            {slot.currentBookings !==
-                                              undefined && (
-                                              <div className="text-xs text-gray-500">
-                                                {slot.currentBookings}/
-                                                {slot.maxBookings} booked
-                                              </div>
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Start Time
+                                          </label>
+                                          <select
+                                            value={slot.startTime}
+                                            onChange={(e) =>
+                                              updateTimeSlot(
+                                                slotIdentifier,
+                                                "startTime",
+                                                e.target.value
+                                              )
+                                            }
+                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                            disabled={!!slot.id}
+                                          >
+                                            {generateTimeOptions().map(
+                                              (time) => (
+                                                <option key={time} value={time}>
+                                                  {time}
+                                                </option>
+                                              )
                                             )}
+                                          </select>
+                                        </div>
+
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            End Time
+                                          </label>
+                                          <select
+                                            value={slot.endTime}
+                                            onChange={(e) =>
+                                              updateTimeSlot(
+                                                slotIdentifier,
+                                                "endTime",
+                                                e.target.value
+                                              )
+                                            }
+                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                            disabled={!!slot.id}
+                                          >
+                                            {generateTimeOptions().map(
+                                              (time) => (
+                                                <option key={time} value={time}>
+                                                  {time}
+                                                </option>
+                                              )
+                                            )}
+                                          </select>
+                                        </div>
+
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Max Bookings
+                                          </label>
+                                          <input
+                                            type="number"
+                                            min="1"
+                                            max="10"
+                                            value={slot.maxBookings}
+                                            onChange={(e) =>
+                                              updateTimeSlot(
+                                                slotIdentifier,
+                                                "maxBookings",
+                                                parseInt(e.target.value) || 1
+                                              )
+                                            }
+                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                            disabled={!!slot.id}
+                                          />
+                                        </div>
+
+                                        <div>
+                                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Timezone
+                                          </label>
+                                          <select
+                                            value={slot.timezone}
+                                            onChange={(e) =>
+                                              updateTimeSlot(
+                                                slotIdentifier,
+                                                "timezone",
+                                                e.target.value
+                                              )
+                                            }
+                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                            disabled={!!slot.id}
+                                          >
+                                            <option value="Africa/Lagos">
+                                              West Africa Time (WAT)
+                                            </option>
+                                            <option value="UTC">UTC</option>
+                                            <option value="America/New_York">
+                                              Eastern Time
+                                            </option>
+                                            <option value="America/Chicago">
+                                              Central Time
+                                            </option>
+                                            <option value="America/Denver">
+                                              Mountain Time
+                                            </option>
+                                            <option value="America/Los_Angeles">
+                                              Pacific Time
+                                            </option>
+                                            <option value="Europe/London">
+                                              London Time
+                                            </option>
+                                          </select>
+                                        </div>
+
+                                        <div className="flex flex-col items-end space-y-2">
+                                          {slot.id ? (
+                                            <>
+                                              <div className="flex items-center space-x-2 text-green-600">
+                                                <CheckIcon className="h-4 w-4" />
+                                                <span className="text-sm font-medium">
+                                                  Saved
+                                                </span>
+                                              </div>
+                                              {slot.currentBookings !==
+                                                undefined && (
+                                                <div className="text-xs text-gray-500">
+                                                  {slot.currentBookings}/
+                                                  {slot.maxBookings} booked
+                                                </div>
+                                              )}
+                                              <motion.button
+                                                whileHover={{ scale: 1.1 }}
+                                                whileTap={{ scale: 0.9 }}
+                                                onClick={() =>
+                                                  deleteExistingSlot(slot.id!)
+                                                }
+                                                className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                                                title="Delete this slot"
+                                              >
+                                                <TrashIcon className="h-4 w-4" />
+                                              </motion.button>
+                                            </>
+                                          ) : (
                                             <motion.button
                                               whileHover={{ scale: 1.1 }}
                                               whileTap={{ scale: 0.9 }}
                                               onClick={() =>
-                                                deleteExistingSlot(slot.id!)
+                                                removeTimeSlot(slotIdentifier)
                                               }
                                               className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                                              title="Delete this slot"
                                             >
                                               <TrashIcon className="h-4 w-4" />
                                             </motion.button>
-                                          </>
-                                        ) : (
-                                          <motion.button
-                                            whileHover={{ scale: 1.1 }}
-                                            whileTap={{ scale: 0.9 }}
-                                            onClick={() =>
-                                              removeTimeSlot(index)
-                                            }
-                                            className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                                          >
-                                            <TrashIcon className="h-4 w-4" />
-                                          </motion.button>
-                                        )}
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  </motion.div>
-                                ))}
+                                    </motion.div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )
@@ -839,7 +876,7 @@ export default function AvailabilityManagement() {
                     )}
                   </div>
 
-                  {timeSlots.some((slot) => !slot.id) && (
+                  {hasNewSlots && (
                     <div className="px-6 pb-6">
                       <motion.button
                         whileHover={{ scale: 1.02 }}

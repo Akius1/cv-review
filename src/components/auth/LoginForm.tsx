@@ -13,6 +13,7 @@ import {
   Lock,
   AlertCircle,
   ArrowRight,
+  ArrowLeft,
 } from "lucide-react";
 
 // Define AuthResponse type
@@ -125,6 +126,21 @@ export default function LoginForm() {
 
   return (
     <div className="w-full max-w-md mx-auto">
+      {/* Back Button */}
+      <motion.div
+        initial={{ opacity: 0, x: -20 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="mb-6"
+      >
+        <Link
+          href="/"
+          className="inline-flex items-center text-gray-600 hover:text-gray-800 transition-colors duration-200"
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          <span className="text-sm font-medium">Back to Home</span>
+        </Link>
+      </motion.div>
+
       <div className="bg-white py-8 px-10 shadow-xl rounded-xl border border-gray-100">
         <div className="flex justify-center mb-6">
           <div className="h-12 w-12 rounded-full bg-indigo-100 flex items-center justify-center">
@@ -276,18 +292,12 @@ export default function LoginForm() {
             <p className="text-sm text-gray-600">
               Don&apos;t have an account yet?
             </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-3">
+            <div className="flex justify-center">
               <Link
                 href="/auth/register/applicant"
                 className="inline-flex items-center justify-center py-2 px-4 border border-indigo-600 rounded-lg text-indigo-600 text-sm font-medium hover:bg-indigo-50 transition-colors duration-200"
               >
                 Register as Applicant
-              </Link>
-              <Link
-                href="/auth/register/expert"
-                className="inline-flex items-center justify-center py-2 px-4 border border-purple-600 rounded-lg text-purple-600 text-sm font-medium hover:bg-purple-50 transition-colors duration-200"
-              >
-                Register as Expert
               </Link>
             </div>
           </div>

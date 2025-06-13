@@ -144,7 +144,7 @@ const formatDateTime = (date: string, time: string) => {
 
 export default function ApplicantDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [cvs, setCVs] = useState<CV[]>([]);
   const [upcomingMeetings, setUpcomingMeetings] = useState<MeetingBooking[]>(
     []
@@ -518,7 +518,7 @@ export default function ApplicantDashboard() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto">
               <motion.div
                 className="bg-white/70 backdrop-blur-sm shadow-lg rounded-xl p-6 text-center border border-white/30 hover:shadow-xl transition-all duration-300"
                 whileHover={{ y: -5 }}
@@ -532,21 +532,6 @@ export default function ApplicantDashboard() {
                   {cvs.length}
                 </p>
                 <p className="text-sm text-gray-500">CVs Uploaded</p>
-              </motion.div>
-
-              <motion.div
-                className="bg-white/70 backdrop-blur-sm shadow-lg rounded-xl p-6 text-center border border-white/30 hover:shadow-xl transition-all duration-300"
-                whileHover={{ y: -5 }}
-              >
-                <div className="flex items-center justify-center mb-3">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <CheckBadgeIcon className="h-6 w-6 text-green-600" />
-                  </div>
-                </div>
-                <p className="text-3xl font-bold text-green-600 mb-1">
-                  {cvs.filter((cv) => cv.status === "completed").length}
-                </p>
-                <p className="text-sm text-gray-500">Reviews Completed</p>
               </motion.div>
 
               <motion.div

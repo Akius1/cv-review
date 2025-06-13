@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/auth/AuthGuard";
 import dynamic from "next/dynamic";
 import { createClient } from "@supabase/supabase-js";
+
 // Define types locally for the expert review functionality
 interface AuthResponse {
   authenticated: boolean;
@@ -29,11 +30,13 @@ interface CVApiResponse {
     first_name: string;
     last_name: string;
     email: string;
+    user_id: number; // Add this to properly identify the applicant
   };
   reviews?: any[];
   responses?: any[];
   error?: string;
 }
+
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeftIcon,
@@ -128,24 +131,34 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
     exit: { opacity: 0, x: -20, transition: { duration: 0.2 } },
   };
 
-  // Your original useEffect - keeping exactly as is but with TypeScript fixes
+  // Enhanced data fetching with better error handling and response fetching
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // First, get user authentication
         const userResponse = await fetch("/api/auth/check");
         const userData: AuthResponse = await userResponse.json();
 
         if (userData.authenticated) {
           setUser(userData.user);
+
+          // Fetch CV data from expert endpoint
           const cvResponse = await fetch(`/api/expert/cv/${params.id}`);
           const cvData: CVApiResponse = await cvResponse.json();
 
-          if (cvData.success) {
+          if (cvData.success && cvData.cv) {
             setCV(cvData.cv);
             setReviews(cvData.reviews || []);
-            setResponses(cvData.responses || []);
 
-            // Generate a signed URL for the PDF from Supabase storage
+            // If responses are returned directly, use them
+            if (cvData.responses) {
+              setResponses(cvData.responses);
+            } else {
+              // Fetch responses separately if not included
+              await fetchResponses(cvData.reviews || []);
+            }
+
+            // Generate PDF URL
             if (cvData.cv?.file_path) {
               const { data: signed, error } = await supabaseClient.storage
                 .from("cvs")
@@ -156,16 +169,9 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                 console.error("Error generating signed URL:", error);
               }
             }
+          } else {
+            console.error("Failed to fetch CV data:", cvData.error);
           }
-        }
-        // Fetch reviewed CVs
-        const reviewedResponse = await fetch(
-          `/api/expert/reviewed-cvs?expertId=${userData?.user?.id}`
-        );
-        const reviewedData: any = await reviewedResponse.json();
-
-        if (reviewedData?.success) {
-          setReviews(reviewedData?.cvs || []);
         }
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -175,7 +181,51 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
     };
 
     fetchData();
-  }, [params.id]);
+  }, [params?.id]);
+
+  // Separate function to fetch responses for all reviews
+  const fetchResponses = async (reviewsList: any[]) => {
+    try {
+      if (reviewsList.length === 0) return;
+
+      // Extract all review IDs
+      const reviewIds = reviewsList.map((review) => review.id).filter(Boolean);
+
+      if (reviewIds.length === 0) return;
+
+      // Fetch responses for these reviews
+      const responsePromises = reviewIds.map(async (reviewId) => {
+        const response: any = await fetch(`/api/responses?reviewId=${reviewId}`);
+        const data = await response.json();
+        return data.success ? data.responses || [] : [];
+      });
+
+      const allResponses = await Promise.all(responsePromises);
+      const flatResponses = allResponses.flat();
+
+      setResponses(flatResponses);
+    } catch (error) {
+      console.error("Error fetching responses:", error);
+      // Try alternative method if the above fails
+      await fetchResponsesAlternative();
+    }
+  };
+
+  // Alternative method to fetch responses using CV data
+  const fetchResponsesAlternative = async () => {
+    try {
+      // Fetch responses for this specific CV
+      const response: any = await fetch(`/api/cv/${params.id}/responses`);
+      if (response.ok) {
+        const data: any = await response.json();
+        if (data.success) {
+          setResponses(data.responses || []);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching responses (alternative method):", error);
+    }
+  };
 
   const handleSubmitReview = async () => {
     if (!reviewContent.trim()) {
@@ -379,7 +429,7 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                   }`}
                 >
                   <ChatBubbleLeftRightIcon className="h-4 w-4" />
-                  <span>Reviews</span>
+                  <span>Reviews & Responses</span>
                   {reviews.length > 0 && (
                     <span className="bg-white/20 text-xs px-1.5 py-0.5 rounded-full">
                       {reviews.length}
@@ -714,7 +764,7 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                         <h2 className="text-xl font-bold text-white flex items-center justify-between">
                           <div className="flex items-center">
                             <ChatBubbleLeftRightIcon className="h-6 w-6 mr-3" />
-                            Review History & Discussions
+                            Expert Reviews & Applicant Responses
                           </div>
                           {reviews.length > 0 && (
                             <span className="bg-white/20 text-white text-sm px-3 py-1 rounded-full">
@@ -723,6 +773,10 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                             </span>
                           )}
                         </h2>
+                        <p className="text-purple-100 text-sm mt-1">
+                          View all expert feedback and applicant responses for
+                          this CV
+                        </p>
                       </div>
 
                       <div className="divide-y divide-gray-200">
@@ -853,7 +907,7 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                                   </motion.div>
 
                                   {/* Applicant Responses */}
-                                  {reviewResponses.length > 0 && (
+                                  {reviewResponses.length > 0 ? (
                                     <motion.div
                                       initial={{ opacity: 0, height: 0 }}
                                       animate={{ opacity: 1, height: "auto" }}
@@ -902,7 +956,7 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                                                       {cv.last_name}
                                                     </span>
                                                     <p className="text-xs text-gray-500">
-                                                      Applicant
+                                                      Applicant Response
                                                     </p>
                                                   </div>
                                                 </div>
@@ -920,10 +974,8 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                                         )}
                                       </div>
                                     </motion.div>
-                                  )}
-
-                                  {/* No Responses State */}
-                                  {reviewResponses.length === 0 && (
+                                  ) : (
+                                    /* No Responses State */
                                     <motion.div
                                       initial={{ opacity: 0 }}
                                       animate={{ opacity: 1 }}
@@ -936,7 +988,7 @@ export default function ReviewCVPage({ params }: { params: { id: string } }) {
                                         </div>
                                         <div>
                                           <h3 className="text-lg font-medium text-gray-700 mb-1">
-                                            Awaiting Response
+                                            Awaiting Applicant Response
                                           </h3>
                                           <p className="text-sm text-gray-500 max-w-md">
                                             The applicant hasn&apos;t responded

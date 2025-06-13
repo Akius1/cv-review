@@ -95,7 +95,7 @@ const formatDate = (dateString: string) => {
 
 export default function ExpertDashboard() {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<ExpertUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [pendingCVs, setPendingCVs] = useState<CVListItem[]>([]);
   const [reviewedCVs, setReviewedCVs] = useState<CVListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);

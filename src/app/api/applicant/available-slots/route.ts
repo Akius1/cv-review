@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin') || '*'
   
   try {
-    
     // Get cookies from the request
     const cookieHeader = request.headers.get('cookie')
     console.log('Cookie header:', cookieHeader ? 'Present' : 'Missing')
@@ -68,8 +67,8 @@ export async function GET(request: NextRequest) {
 
     console.log('User verified:', verified.email)
 
-    // Fetch ALL available slots without date filtering
-    console.log('Fetching all available slots...')
+    // Fetch ALL available slots with detailed booking information
+    console.log('Fetching all available slots with detailed booking info...')
     const { data: availabilitySlots, error } = await supabase
       .from('expert_availability')
       .select(`
@@ -78,7 +77,7 @@ export async function GET(request: NextRequest) {
           id, first_name, last_name, email, user_type
         ),
         bookings:meeting_bookings!availability_id(
-          id, status, applicant_id
+          id, status, applicant_id, created_at, cancelled_at, cancellation_reason
         )
       `)
       .eq('is_available', true)
@@ -111,12 +110,17 @@ export async function GET(request: NextRequest) {
 
     // Process all slots to calculate availability and categorize them
     const processedSlots = availabilitySlots?.map(slot => {
-      // Count active bookings (only scheduled bookings count)
-      const activeBookings = (slot.bookings || []).filter(
-        (booking: any) => booking.status === 'scheduled'
-      ).length
+      const bookings = slot.bookings || []
       
-      // Calculate available spots
+      // Separate bookings by status
+      const scheduledBookings = bookings.filter((booking: any) => booking.status === 'scheduled')
+      const cancelledBookings = bookings.filter((booking: any) => booking.status === 'cancelled')
+      const completedBookings = bookings.filter((booking: any) => booking.status === 'completed')
+      
+      // Count only scheduled bookings for availability calculation
+      const activeBookings = scheduledBookings.length
+      
+      // Calculate available spots (cancelled bookings free up spots)
       const availableSpots = slot.max_bookings - activeBookings
       
       // Check if slot is in the past
@@ -125,12 +129,31 @@ export async function GET(request: NextRequest) {
       const isExpired = slotDate < currentDate || 
                       (slotDate === currentDate && slotTime <= currentTime)
       
+      // Check for recently cancelled bookings (within last 24 hours)
+      const recentlyCancelled = cancelledBookings.filter((booking: any) => {
+        if (!booking.cancelled_at) return false
+        const cancelledDate = new Date(booking.cancelled_at)
+        const hoursSinceCancellation = (now.getTime() - cancelledDate.getTime()) / (1000 * 60 * 60)
+        return hoursSinceCancellation <= 24
+      })
+      
       // Determine slot status
       let slotStatus = 'available'
+      const statusDetails: any = {
+        has_cancelled_bookings: cancelledBookings.length > 0,
+        recently_cancelled: recentlyCancelled.length > 0,
+        total_bookings: bookings.length,
+        scheduled_bookings: scheduledBookings.length,
+        cancelled_bookings: cancelledBookings.length,
+        completed_bookings: completedBookings.length
+      }
+      
       if (isExpired) {
         slotStatus = 'expired'
       } else if (availableSpots <= 0) {
         slotStatus = 'fully_booked'
+      } else if (recentlyCancelled.length > 0) {
+        slotStatus = 'recently_available' // New status for recently freed up slots
       }
       
       console.log(`Slot ${slot.id}: ${slot.date} ${slot.start_time}`, {
@@ -138,7 +161,9 @@ export async function GET(request: NextRequest) {
         maxBookings: slot.max_bookings,
         availableSpots,
         isExpired,
-        status: slotStatus
+        status: slotStatus,
+        cancelledBookings: cancelledBookings.length,
+        recentlyCancelled: recentlyCancelled.length
       })
       
       return {
@@ -146,17 +171,37 @@ export async function GET(request: NextRequest) {
         current_bookings: activeBookings,
         available_spots: availableSpots,
         status: slotStatus,
+        status_details: statusDetails,
         is_expired: isExpired,
         is_fully_booked: availableSpots <= 0,
+        has_cancelled_bookings: cancelledBookings.length > 0,
+        recently_cancelled_count: recentlyCancelled.length,
         expert_name: slot.expert 
           ? `${slot.expert.first_name || ''} ${slot.expert.last_name || ''}`.trim()
-          : 'Unknown Expert'
+          : 'Unknown Expert',
+        // Add booking history for transparency
+        booking_summary: {
+          total: bookings.length,
+          scheduled: scheduledBookings.length,
+          cancelled: cancelledBookings.length,
+          completed: completedBookings.length,
+          recently_cancelled: recentlyCancelled.length
+        }
       }
     }) || []
 
     // Separate slots into different categories
     const availableSlots = processedSlots.filter(slot => 
-      slot.status === 'available' && !slot.is_expired && slot.available_spots > 0
+      !slot.is_expired && slot.available_spots > 0
+    )
+    
+    // Separate recently available slots (had cancellations)
+    const recentlyAvailableSlots = availableSlots.filter(slot => 
+      slot.status === 'recently_available'
+    )
+    
+    const regularAvailableSlots = availableSlots.filter(slot => 
+      slot.status === 'available'
     )
     
     const expiredSlots = processedSlots.filter(slot => slot.is_expired)
@@ -167,23 +212,29 @@ export async function GET(request: NextRequest) {
     console.log('Processed slots summary:', {
       total: processedSlots.length,
       available: availableSlots.length,
+      recentlyAvailable: recentlyAvailableSlots.length,
+      regularAvailable: regularAvailableSlots.length,
       expired: expiredSlots.length,
       fullyBooked: fullyBookedSlots.length
     })
 
-    // Return all slots data
+    // Return enhanced slots data
     const responseData: any = {
       success: true,
-      slots: availableSlots, // Main slots to display for booking
-      all_slots: processedSlots, // All slots for debugging
+      slots: availableSlots, // All bookable slots (includes recently available)
+      recently_available_slots: recentlyAvailableSlots, // Slots with recent cancellations
+      regular_available_slots: regularAvailableSlots, // Slots that were never booked or no recent activity
       expired_slots: expiredSlots,
       fully_booked_slots: fullyBookedSlots,
       total: availableSlots.length,
       metadata: {
         total_slots: processedSlots.length,
         available_count: availableSlots.length,
+        recently_available_count: recentlyAvailableSlots.length,
+        regular_available_count: regularAvailableSlots.length,
         expired_count: expiredSlots.length,
-        fully_booked_count: fullyBookedSlots.length
+        fully_booked_count: fullyBookedSlots.length,
+        slots_with_cancellations: processedSlots.filter(s => s.has_cancelled_bookings).length
       },
       debug: {
         currentDateTime: { currentDate, currentTime },

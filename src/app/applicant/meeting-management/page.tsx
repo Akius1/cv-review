@@ -24,6 +24,8 @@ import {
   UserIcon,
   AcademicCapIcon,
   ArrowPathIcon,
+  SparklesIcon,
+  ExclamationCircleIcon,
 } from "@heroicons/react/24/outline";
 
 // --- Type Definitions ---
@@ -72,19 +74,36 @@ interface AvailabilitySlot {
   max_bookings: number;
   current_bookings: number;
   available_spots: number;
-  status: "available" | "expired" | "fully_booked";
+  status: "available" | "recently_available" | "expired" | "fully_booked";
   is_expired: boolean;
   is_fully_booked: boolean;
+  has_cancelled_bookings: boolean;
+  recently_cancelled_count: number;
   expert?: {
     id: number;
     first_name: string;
     last_name: string;
     email: string;
     user_type: string;
-    // Removed: bio, specialization, experience_years (don't exist in your DB)
   };
   expert_name?: string;
+  status_details?: {
+    has_cancelled_bookings: boolean;
+    recently_cancelled: boolean;
+    total_bookings: number;
+    scheduled_bookings: number;
+    cancelled_bookings: number;
+    completed_bookings: number;
+  };
+  booking_summary?: {
+    total: number;
+    scheduled: number;
+    cancelled: number;
+    completed: number;
+    recently_cancelled: number;
+  };
 }
+
 interface User {
   id: number | string;
   email: string;
@@ -98,18 +117,22 @@ interface ApiResponse {
   meetings?: MeetingBooking[];
   meeting?: MeetingBooking;
   slots?: AvailabilitySlot[];
-  expired_slots?: AvailabilitySlot[]; // NEW
-  fully_booked_slots?: AvailabilitySlot[]; // NEW
+  recently_available_slots?: AvailabilitySlot[];
+  regular_available_slots?: AvailabilitySlot[];
+  expired_slots?: AvailabilitySlot[];
+  fully_booked_slots?: AvailabilitySlot[];
   error?: string;
   message?: string;
   total?: number;
   has_more?: boolean;
   metadata?: {
-    // NEW
     total_slots: number;
     available_count: number;
+    recently_available_count: number;
+    regular_available_count: number;
     expired_count: number;
     fully_booked_count: number;
+    slots_with_cancellations: number;
   };
 }
 
@@ -231,8 +254,11 @@ export default function ApplicantMeetingManagement() {
     text: string;
   } | null>(null);
 
-  // Booking states
+  // Enhanced booking states
   const [availableSlots, setAvailableSlots] = useState<AvailabilitySlot[]>([]);
+  const [recentlyAvailableSlots, setRecentlyAvailableSlots] = useState<
+    AvailabilitySlot[]
+  >([]);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingMessage, setBookingMessage] = useState<{
     type: "success" | "error";
@@ -330,35 +356,56 @@ export default function ApplicantMeetingManagement() {
     fetchData();
   }, [router]);
 
-  // Fetch available slots for booking
-  // Replace your fetchAvailableSlots function with this simplified version:
-
+  // Enhanced fetch available slots function
   const fetchAvailableSlots = async () => {
     setBookingLoading(true);
     setBookingMessage(null);
 
     try {
-      console.log("Fetching all available slots...");
+      console.log("Fetching enhanced available slots...");
 
-      // Simple fetch without date parameters - get ALL slots
       const response = await fetch("/api/applicant/available-slots");
-
       const data: ApiResponse = await response.json();
 
-      console.log("API Response:", data);
+      console.log("Enhanced API Response:", data);
 
       if (data.success) {
         if (data.slots && data.slots.length > 0) {
           setAvailableSlots(data.slots);
-          console.log("Available slots loaded:", data.slots.length);
+          setRecentlyAvailableSlots(data.recently_available_slots || []);
+          console.log("Available slots loaded:", {
+            total: data.slots.length,
+            recentlyAvailable: data.recently_available_slots?.length || 0,
+            metadata: data.metadata,
+          });
         } else {
           setAvailableSlots([]);
-          // Show detailed message about why no slots are available
+          setRecentlyAvailableSlots([]);
+
+          // Enhanced message about availability
           const metadata = data.metadata;
           let message = "No available slots found.";
 
           if (metadata) {
-            message += ` Total slots in system: ${metadata.total_slots}, Available: ${metadata.available_count}, Expired: ${metadata.expired_count}, Fully booked: ${metadata.fully_booked_count}`;
+            const details = [];
+            if (metadata.total_slots > 0) {
+              details.push(`${metadata.total_slots} total slots in system`);
+            }
+            if (metadata.expired_count > 0) {
+              details.push(`${metadata.expired_count} expired`);
+            }
+            if (metadata.fully_booked_count > 0) {
+              details.push(`${metadata.fully_booked_count} fully booked`);
+            }
+            if (metadata.slots_with_cancellations > 0) {
+              details.push(
+                `${metadata.slots_with_cancellations} have had cancellations`
+              );
+            }
+
+            if (details.length > 0) {
+              message += ` Details: ${details.join(", ")}.`;
+            }
           }
 
           setBookingMessage({
@@ -368,6 +415,7 @@ export default function ApplicantMeetingManagement() {
         }
       } else {
         setAvailableSlots([]);
+        setRecentlyAvailableSlots([]);
         setBookingMessage({
           type: "error",
           text: data.error || "Failed to load available slots",
@@ -376,6 +424,7 @@ export default function ApplicantMeetingManagement() {
     } catch (error) {
       console.error("Error fetching available slots:", error);
       setAvailableSlots([]);
+      setRecentlyAvailableSlots([]);
       setBookingMessage({
         type: "error",
         text: "Failed to load available slots. Please try again.",
@@ -391,10 +440,14 @@ export default function ApplicantMeetingManagement() {
     setBookingMessage(null);
     fetchAvailableSlots();
   };
-  const getSlotStatusColor = (status: string) => {
-    switch (status) {
+
+  // Enhanced slot status styling
+  const getSlotStatusColor = (slot: AvailabilitySlot) => {
+    switch (slot.status) {
       case "available":
         return "border-green-200 bg-green-50";
+      case "recently_available":
+        return "border-blue-200 bg-blue-50 ring-2 ring-blue-300 ring-opacity-50";
       case "expired":
         return "border-gray-300 bg-gray-100";
       case "fully_booked":
@@ -403,42 +456,97 @@ export default function ApplicantMeetingManagement() {
         return "border-gray-200 bg-white";
     }
   };
+
+  // Enhanced slot status text
   const getSlotStatusText = (slot: AvailabilitySlot) => {
     if (slot.is_expired) return "Expired";
     if (slot.is_fully_booked) return "Fully Booked";
-    return `${slot.available_spots} ${
+
+    const statusText = `${slot.available_spots} ${
       slot.available_spots === 1 ? "spot" : "spots"
     } available`;
+
+    if (
+      slot.status === "recently_available" &&
+      slot.recently_cancelled_count > 0
+    ) {
+      return `${statusText} (${slot.recently_cancelled_count} recently cancelled)`;
+    }
+
+    return statusText;
   };
 
-  const renderSlotCard = (slot: AvailabilitySlot) => {
+  // Enhanced slot status icon
+  const getSlotStatusIcon = (slot: AvailabilitySlot) => {
+    switch (slot.status) {
+      case "recently_available":
+        return <SparklesIcon className="h-4 w-4 text-blue-600" />;
+      case "available":
+        return <CheckBadgeIcon className="h-4 w-4 text-green-600" />;
+      case "expired":
+        return <ClockIcon className="h-4 w-4 text-gray-400" />;
+      case "fully_booked":
+        return <ExclamationCircleIcon className="h-4 w-4 text-orange-600" />;
+      default:
+        return <InformationCircleIcon className="h-4 w-4 text-gray-400" />;
+    }
+  };
+
+  // Enhanced slot card rendering
+  const renderSlotCard = (
+    slot: AvailabilitySlot,
+    isRecentlyAvailable = false
+  ) => {
     const isBookable =
-      slot.status === "available" &&
+      (slot.status === "available" || slot.status === "recently_available") &&
       !slot.is_expired &&
       slot.available_spots > 0;
 
     return (
       <motion.div
         key={slot.id}
-        className={`p-4 border rounded-lg hover:shadow-md transition-shadow duration-200 ${getSlotStatusColor(
-          slot.status
-        )}`}
+        className={`p-4 border rounded-lg hover:shadow-md transition-all duration-300 ${getSlotStatusColor(slot)} ${
+          isRecentlyAvailable ? "relative overflow-hidden" : ""
+        }`}
         whileHover={{ y: isBookable ? -2 : 0 }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
       >
+        {/* Recently Available Badge */}
+        {slot.status === "recently_available" && (
+          <div className="absolute top-2 right-2">
+            <motion.div
+              className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full flex items-center"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <SparklesIcon className="h-3 w-3 mr-1" />
+              Recently Available
+            </motion.div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-2">
           <div className="text-sm font-medium text-gray-900">
             {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
           </div>
-          <div
-            className={`text-xs px-2 py-1 rounded ${
-              slot.status === "available"
-                ? "text-green-600 bg-green-100"
-                : slot.status === "expired"
-                ? "text-gray-600 bg-gray-100"
-                : "text-orange-600 bg-orange-100"
-            }`}
-          >
-            {getSlotStatusText(slot)}
+          <div className="flex items-center space-x-1">
+            {getSlotStatusIcon(slot)}
+            <div
+              className={`text-xs px-2 py-1 rounded ${
+                slot.status === "available"
+                  ? "text-green-600 bg-green-100"
+                  : slot.status === "recently_available"
+                    ? "text-blue-600 bg-blue-100"
+                    : slot.status === "expired"
+                      ? "text-gray-600 bg-gray-100"
+                      : "text-orange-600 bg-orange-100"
+              }`}
+            >
+              {getSlotStatusText(slot)}
+            </div>
           </div>
         </div>
 
@@ -452,15 +560,42 @@ export default function ApplicantMeetingManagement() {
           <div className="text-xs text-gray-500">
             Expert ID: {slot.expert_id}
           </div>
-          {/* Removed specialization and experience_years since they don't exist */}
+
+          {/* Show booking history for transparency */}
+          {slot.booking_summary && slot.booking_summary.total > 0 && (
+            <div className="text-xs text-gray-500 mt-1">
+              {slot.booking_summary.total} total booking
+              {slot.booking_summary.total !== 1 ? "s" : ""}
+              {slot.booking_summary.cancelled > 0 && (
+                <span className="text-blue-600">
+                  {" "}
+                  ({slot.booking_summary.cancelled} cancelled)
+                </span>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Enhanced cancellation info */}
+        {slot.has_cancelled_bookings && (
+          <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+            <div className="flex items-center text-blue-700">
+              <ArrowPathIcon className="h-3 w-3 mr-1" />
+              <span>
+                This slot had previous cancellations - now available again!
+              </span>
+            </div>
+          </div>
+        )}
 
         <motion.button
           onClick={() => (isBookable ? handleBookSlot(slot) : null)}
           disabled={bookingLoading || !isBookable}
           className={`w-full px-3 py-2 text-sm font-medium rounded-lg shadow-md transition-all duration-300 ${
             isBookable
-              ? "bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700"
+              ? slot.status === "recently_available"
+                ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700"
+                : "bg-gradient-to-r from-sky-500 to-blue-600 text-white hover:from-sky-600 hover:to-blue-700"
               : "bg-gray-300 text-gray-500 cursor-not-allowed"
           }`}
           whileHover={{ scale: isBookable ? 1.02 : 1 }}
@@ -479,6 +614,8 @@ export default function ApplicantMeetingManagement() {
             "Expired"
           ) : slot.is_fully_booked ? (
             "Fully Booked"
+          ) : slot.status === "recently_available" ? (
+            "Book This Recently Available Slot"
           ) : (
             "Book This Slot"
           )}
@@ -540,19 +677,41 @@ export default function ApplicantMeetingManagement() {
     }
   };
 
-  // Group slots by date
+  // Group slots by date with enhanced categorization
   const getSlotsByDate = () => {
-    const grouped = availableSlots.reduce((acc, slot) => {
-      if (!acc[slot.date]) {
-        acc[slot.date] = [];
-      }
-      acc[slot.date].push(slot);
-      return acc;
-    }, {} as Record<string, AvailabilitySlot[]>);
+    const allSlots = [...availableSlots];
 
-    // Sort slots within each date by time
+    const grouped = allSlots.reduce(
+      (acc, slot) => {
+        if (!acc[slot.date]) {
+          acc[slot.date] = {
+            regular: [],
+            recently_available: [],
+          };
+        }
+
+        if (slot.status === "recently_available") {
+          acc[slot.date].recently_available.push(slot);
+        } else {
+          acc[slot.date].regular.push(slot);
+        }
+
+        return acc;
+      },
+      {} as Record<
+        string,
+        { regular: AvailabilitySlot[]; recently_available: AvailabilitySlot[] }
+      >
+    );
+
+    // Sort slots within each date and category by time
     Object.keys(grouped).forEach((date) => {
-      grouped[date].sort((a, b) => a.start_time.localeCompare(b.start_time));
+      grouped[date].regular.sort((a, b) =>
+        a.start_time.localeCompare(b.start_time)
+      );
+      grouped[date].recently_available.sort((a, b) =>
+        a.start_time.localeCompare(b.start_time)
+      );
     });
 
     return grouped;
@@ -960,7 +1119,7 @@ export default function ApplicantMeetingManagement() {
           </motion.button>
         </div>
 
-        {/* Booking Modal */}
+        {/* Enhanced Booking Modal */}
         <AnimatePresence>
           {showBookingModal && (
             <motion.div
@@ -1062,18 +1221,62 @@ export default function ApplicantMeetingManagement() {
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">
                         Available Time Slots
+                        <span className="ml-2 text-sm text-gray-500">
+                          ({availableSlots.length} slots available)
+                        </span>
                       </h3>
 
                       {Object.entries(getSlotsByDate()).map(([date, slots]) => (
-                        <div key={date} className="mb-6">
-                          <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center">
+                        <div key={date} className="mb-8">
+                          <h4 className="text-md font-medium text-gray-700 mb-4 flex items-center">
                             <CalendarIcon className="h-4 w-4 mr-2" />
                             {formatDate(date)}
+                            <span className="ml-2 text-sm text-gray-500">
+                              (
+                              {slots.recently_available.length +
+                                slots.regular.length}{" "}
+                              slots)
+                            </span>
                           </h4>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {slots.map(renderSlotCard)}
-                          </div>
+                          {/* Recently Available Slots First */}
+                          {slots.recently_available.length > 0 && (
+                            <div className="mb-6">
+                              <div className="flex items-center mb-3">
+                                <SparklesIcon className="h-4 w-4 text-blue-600 mr-2" />
+                                <h5 className="text-sm font-medium text-blue-800">
+                                  Recently Available Slots
+                                  <span className="ml-1 text-xs text-blue-600">
+                                    (Had recent cancellations)
+                                  </span>
+                                </h5>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {slots.recently_available.map((slot) =>
+                                  renderSlotCard(slot, true)
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Regular Available Slots */}
+                          {slots.regular.length > 0 && (
+                            <div>
+                              {slots.recently_available.length > 0 && (
+                                <div className="flex items-center mb-3">
+                                  <CheckBadgeIcon className="h-4 w-4 text-green-600 mr-2" />
+                                  <h5 className="text-sm font-medium text-green-800">
+                                    Other Available Slots
+                                  </h5>
+                                </div>
+                              )}
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {slots.regular.map((slot) =>
+                                  renderSlotCard(slot)
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

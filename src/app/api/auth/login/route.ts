@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { verifyPassword, generateToken } from '@/lib/auth/utils'
 
+console.log(
+  'SUPABASE_URL:', process.env.SUPABASE_URL,
+  'SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY
+)
+
 // Initialize Supabase client with service-role key
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -11,6 +16,8 @@ const supabase = createClient(
     auth: { autoRefreshToken: false, persistSession: false },
   }
 )
+
+
 
 // CORS helper (same as register)
 function buildCorsHeaders(origin: string) {
@@ -39,6 +46,8 @@ export async function POST(request: NextRequest) {
       password: string
     }
 
+    console.log(identifier, password, "example")
+
     // Validate required
     if (!identifier || !password) {
       return NextResponse.json(
@@ -58,6 +67,8 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (selectErr) {
+
+      console.log(selectErr, "selectErr")
       // If no rows found or other error
       console.error('Login select error:', selectErr)
       return NextResponse.json(

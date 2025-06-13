@@ -1,131 +1,102 @@
+// 1. Update your existing /api/expert/cv/[id]/route.ts to include responses
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// src/app/api/expert/cv/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// CORS helper
-function buildCorsHeaders(origin: string) {
-  return {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Credentials': 'true',
-  }
-}
-
-export async function OPTIONS(request: NextRequest) {
-  const origin = request.headers.get('origin') || '*'
-  return new NextResponse(null, { status: 204, headers: buildCorsHeaders(origin) })
-}
-
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
-  const origin = request.headers.get('origin') || '*'
   try {
-    // Await dynamic params
-    const { id } = await context.params
-    const cvId = parseInt(id, 10)
-    if (isNaN(cvId)) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Invalid CV ID' }),
-        { status: 400, headers: buildCorsHeaders(origin) }
-      )
-    }
+    const cvId = params.id
 
-    // Fetch CV with applicant info
-    const { data: cv, error: cvErr } = await supabase
+    // Fetch CV details with applicant info
+    const { data: cvData, error: cvError } = await supabase
       .from('cvs')
-      .select(
-        'id, file_name, file_path, status, created_at, user_id, users(first_name, last_name, email)'
-      )
+      .select(`
+        *,
+        users!cvs_user_id_fkey(first_name, last_name, email)
+      `)
       .eq('id', cvId)
       .single()
 
-    if (cvErr || !cv) {
-      console.error('CV fetch error:', cvErr)
-      return new NextResponse(
-        JSON.stringify({ error: 'CV not found' }),
-        { status: 404, headers: buildCorsHeaders(origin) }
+    if (cvError || !cvData) {
+      return NextResponse.json(
+        { success: false, error: 'CV not found' },
+        { status: 404 }
       )
     }
 
-    // Map CV shape
-    const cvDetail = {
-      id: cv.id,
-      file_name: cv.file_name,
-      file_path: cv.file_path,
-      status: cv.status,
-      created_at: cv.created_at,
-      first_name: (cv.users as any).first_name,
-      last_name: (cv.users as any).last_name,
-      email: (cv.users as any).email,
-    }
-
-    // Fetch existing reviews by this expert on this CV
-    const { data: reviewsRaw, error: revErr } = await supabase
+    // Fetch reviews for this CV with expert info
+    const { data: reviewsData, error: reviewsError } = await supabase
       .from('reviews')
-      .select('id, content, created_at, users(first_name, last_name)')
+      .select(`
+        *,
+        users!reviews_expert_id_fkey(first_name, last_name, email)
+      `)
       .eq('cv_id', cvId)
-      .eq('expert_id', cv.user_id)
       .order('created_at', { ascending: false })
 
-    if (revErr) {
-      console.error('Reviews fetch error:', revErr)
-      return new NextResponse(
-        JSON.stringify({ error: 'Failed to fetch reviews' }),
-        { status: 500, headers: buildCorsHeaders(origin) }
+    if (reviewsError) {
+      console.error('Error fetching reviews:', reviewsError)
+      return NextResponse.json(
+        { success: false, error: 'Failed to fetch reviews' },
+        { status: 500 }
       )
     }
 
-    const reviews = (reviewsRaw || []).map(r => {
-      const reviewer = Array.isArray(r.users) ? r.users[0] : r.users
-      return {
-        id: r.id,
-        content: r.content,
-        created_at: r.created_at,
-        first_name: reviewer.first_name,
-        last_name: reviewer.last_name,
-      }
-    })
+    // Fetch responses for all reviews
+    const reviewIds = (reviewsData || []).map(review => review.id)
+    let responsesData: any[] = []
 
-    // Fetch responses to those reviews
-    const reviewIds = reviews.map(r => r.id)
-    let responses: any[] = []
     if (reviewIds.length > 0) {
-      const { data: respRaw, error: respErr } = await supabase
+      const { data: fetchedResponses, error: responsesError } = await supabase
         .from('responses')
-        .select('id, review_id, content, created_at')
+        .select('*')
         .in('review_id', reviewIds)
         .order('created_at', { ascending: true })
 
-      if (respErr) {
-        console.error('Responses fetch error:', respErr)
-        return new NextResponse(
-          JSON.stringify({ error: 'Failed to fetch responses' }),
-          { status: 500, headers: buildCorsHeaders(origin) }
-        )
+      if (responsesError) {
+        console.error('Error fetching responses:', responsesError)
+      } else {
+        responsesData = fetchedResponses || []
       }
-      responses = respRaw || []
     }
 
-    return new NextResponse(
-      JSON.stringify({ success: true, cv: cvDetail, reviews, responses }),
-      { status: 200, headers: buildCorsHeaders(origin) }
-    )
+    // Format the data
+    const formattedCV = {
+      ...cvData,
+      first_name: cvData.users?.first_name,
+      last_name: cvData.users?.last_name,
+      email: cvData.users?.email,
+    }
+
+    const formattedReviews = (reviewsData || []).map((review: any) => ({
+      ...review,
+      first_name: review.users?.first_name,
+      last_name: review.users?.last_name,
+      expert_email: review.users?.email,
+    }))
+
+    return NextResponse.json({
+      success: true,
+      cv: formattedCV,
+      reviews: formattedReviews,
+      responses: responsesData,
+    })
+
   } catch (error) {
-    console.error('Expert CV detail route error:', error)
-    return new NextResponse(
-      JSON.stringify({ error: 'Failed to get CV details' }),
-      { status: 500, headers: buildCorsHeaders(request.headers.get('origin') || '*') }
+    console.error('Expert CV API error:', error)
+    return NextResponse.json(
+      { success: false, error: 'Internal server error' },
+      { status: 500 }
     )
   }
 }
+
