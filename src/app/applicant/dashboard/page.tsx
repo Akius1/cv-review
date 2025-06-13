@@ -300,9 +300,7 @@ export default function ApplicantDashboard() {
   const processFileUpload = useCallback(
     async (file: File) => {
       if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-        setUploadError(
-          "Invalid file type. Please upload a PDF or Word document (doc, docx)."
-        );
+        setUploadError("Invalid file type. Please upload a PDF .");
         return;
       }
       if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -667,7 +665,7 @@ export default function ApplicantDashboard() {
                     <span className="mr-2" role="img" aria-label="Lock icon">
                       🔒
                     </span>
-                    Supported: PDF, DOCX, DOC (Max {MAX_FILE_SIZE_MB}MB)
+                    Supported: PDF (Max {MAX_FILE_SIZE_MB}MB)
                   </p>
                 </div>
               </div>
